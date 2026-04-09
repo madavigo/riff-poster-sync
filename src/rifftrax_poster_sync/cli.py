@@ -1,6 +1,7 @@
 """Command-line interface for rifftrax-poster-sync."""
 
 import argparse
+import pathlib
 import sys
 
 from . import __version__
@@ -27,6 +28,7 @@ def main():
     sync_p.add_argument("--library", default="RiffTrax", help="Library name (default: RiffTrax)")
     sync_p.add_argument("--dry-run", action="store_true", help="Show what would be done without uploading")
     sync_p.add_argument("--refresh-catalog", action="store_true", help="Force refresh the RiffTrax catalog cache")
+    sync_p.add_argument("--cache-dir", default=None, help="Override cache directory path")
 
     # --- catalog ---
     cat_p = sub.add_parser("catalog", help="Manage the RiffTrax catalog cache")
@@ -38,11 +40,13 @@ def main():
     if args.command == "sync":
         if args.server == "emby":
             server = EmbyServer(args.host, args.api_key)
+        cache_dir = pathlib.Path(args.cache_dir) if args.cache_dir else None
         sync(
             server=server,
             library_name=args.library,
             dry_run=args.dry_run,
             force_refresh=args.refresh_catalog,
+            cache_dir=cache_dir,
         )
 
     elif args.command == "catalog":
