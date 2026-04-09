@@ -12,31 +12,49 @@ spec:
     spec:
       backoffLimit: 1
       template:
-        metadata:
-          annotations:
-            vault.hashicorp.com/agent-inject: "true"
-            vault.hashicorp.com/role: "rifftrax-poster-sync"
-            vault.hashicorp.com/agent-inject-secret-config: "secret/data/resilience-lab/rifftrax-poster-sync"
-            vault.hashicorp.com/agent-inject-template-config: |
-              {{- with secret "secret/data/resilience-lab/rifftrax-poster-sync" -}}
-              export EMBY_HOST="{{ .Data.data.emby_host }}"
-              export EMBY_API_KEY="{{ .Data.data.emby_api_key }}"
-              export LIBRARY="{{ .Data.data.library }}"
-              {{- end }}
         spec:
           restartPolicy: Never
-          containers:
-          - name: sync
-            image: ghcr.io/madavigo/rifftrax-poster-sync:latest
+          volumes:
+          - name: secrets
+            emptyDir:
+              medium: Memory
+          initContainers:
+          - name: vault-secrets
+            image: curlimages/curl:latest
             command:
-            - /bin/sh
+            - sh
             - -c
             - |
-              . /vault/secrets/config
+              set -e
+              secrets=$(curl -sf \
+                -H "X-Vault-Token: ${VAULT_TOKEN}" \
+                http://vault.vault.svc.cluster.local:8200/v1/secret/data/resilience-lab/rifftrax-poster-sync)
+              echo "$secrets" | grep -o '"emby_host":"[^"]*"' | cut -d'"' -f4 > /secrets/emby_host
+              echo "$secrets" | grep -o '"emby_api_key":"[^"]*"' | cut -d'"' -f4 > /secrets/emby_api_key
+              echo "$secrets" | grep -o '"library":"[^"]*"' | cut -d'"' -f4 > /secrets/library
+            env:
+            - name: VAULT_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: vault-token
+                  key: token
+            volumeMounts:
+            - name: secrets
+              mountPath: /secrets
+          containers:
+          - name: sync
+            image: ghcr.io/madavigo/riff-poster-sync:latest
+            command:
+            - sh
+            - -c
+            - |
               rifftrax-poster-sync sync \
-                --host "$EMBY_HOST" \
-                --api-key "$EMBY_API_KEY" \
-                --library "$LIBRARY"
+                --host "$(cat /secrets/emby_host)" \
+                --api-key "$(cat /secrets/emby_api_key)" \
+                --library "$(cat /secrets/library)"
+            volumeMounts:
+            - name: secrets
+              mountPath: /secrets
             resources:
               requests:
                 memory: 128Mi
