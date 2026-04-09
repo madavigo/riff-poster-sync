@@ -53,6 +53,21 @@ class EmbyServer(MediaServer):
         missing = [i for i in items if "Primary" not in i.get("ImageTags", {})]
         return items, missing
 
+    def update_title(self, item_id, title):
+        url = f"{self.host}/Items/{item_id}?api_key={self.api_key}"
+        # Emby requires sending the full item object back; fetch it first
+        item = self._get(f"/Items/{item_id}")
+        item["Name"] = title
+        data = json.dumps(item).encode("utf-8")
+        req = urllib.request.Request(url, data=data, method="POST")
+        req.add_header("Content-Type", "application/json")
+        try:
+            with urllib.request.urlopen(req) as resp:
+                return resp.status in (200, 204)
+        except urllib.error.HTTPError as e:
+            print(f"  Title update failed: HTTP {e.code} {e.reason}")
+            return False
+
     def upload_poster(self, item_id, image_bytes):
         url = f"{self.host}/Items/{item_id}/Images/Primary?api_key={self.api_key}"
         encoded = base64.b64encode(image_bytes)

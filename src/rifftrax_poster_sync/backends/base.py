@@ -22,5 +22,9 @@ class MediaServer(ABC):
         """
 
     @abstractmethod
+    def update_title(self, item_id, title):
+        """Update the display title for an item. Returns True on success."""
+
+    @abstractmethod
     def upload_poster(self, item_id, image_bytes):
         """Upload poster image bytes for an item. Returns True on success."""

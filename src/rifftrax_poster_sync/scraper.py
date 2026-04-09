@@ -17,20 +17,13 @@ def _is_useful_image(url):
     return not any(frag in url for frag in _GENERIC_IMAGE_FRAGMENTS)
 
 
-def scrape_poster_url(slug):
-    """Fetch a rifftrax.com product page and extract the best poster image URL.
-
-    Tries in order:
-      1. Styled poster image (styles/poster CDN path)
-      2. Any rifftrax CDN image
-      3. og:image meta tag
-    Returns URL string or None.
-    """
+def _fetch_page(slug):
+    """Fetch a rifftrax.com product page and return the HTML, or None on failure."""
     url = f"{RIFFTRAX_BASE}/{slug}"
     try:
         req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
         with urllib.request.urlopen(req) as resp:
-            page_html = resp.read().decode("utf-8", errors="replace")
+            return resp.read().decode("utf-8", errors="replace")
     except urllib.error.HTTPError as e:
         if e.code != 404:
             print(f"  Warning: HTTP {e.code} fetching {url}")
@@ -39,6 +32,23 @@ def scrape_poster_url(slug):
         print(f"  Warning: URL error fetching {url}: {e.reason}")
         return None
 
+
+def scrape_page(slug):
+    """Fetch a rifftrax.com product page and return (poster_url, title).
+
+    Either value may be None if not found.
+    """
+    page_html = _fetch_page(slug)
+    if not page_html:
+        return None, None
+
+    poster_url = _extract_poster(page_html)
+    title = _extract_title(page_html)
+    return poster_url, title
+
+
+def _extract_poster(page_html):
+    """Extract the best poster image URL from page HTML."""
     # 1. Styled poster image
     m = re.search(
         r'src="(https://www\.rifftrax\.com/sites/default/files/styles/poster[^"]+)"',
@@ -64,6 +74,31 @@ def scrape_poster_url(slug):
         return m.group(1)
 
     return None
+
+
+def _extract_title(page_html):
+    """Extract the canonical product title from og:title meta tag."""
+    import html as _html
+    m = re.search(
+        r'<meta[^>]+property="og:title"[^>]+content="([^"]+)"',
+        page_html,
+    )
+    if m:
+        title = _html.unescape(m.group(1).strip())
+        # Strip trailing site name e.g. " | RiffTrax"
+        title = re.sub(r'\s*\|\s*RiffTrax\s*$', '', title).strip()
+        return title if title else None
+    return None
+
+
+def scrape_poster_url(slug):
+    """Fetch a rifftrax.com product page and extract the best poster image URL.
+
+    Deprecated: use scrape_page() to get both poster and title in one request.
+    Returns URL string or None.
+    """
+    poster_url, _ = scrape_page(slug)
+    return poster_url
 
 
 def download_poster(poster_url):
