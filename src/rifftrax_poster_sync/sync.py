@@ -3,17 +3,21 @@
 from .catalog import build_catalog
 from .matcher import clean_name, match_to_catalog
 from .scraper import download_poster, scrape_page
+from .sync_cache import is_synced, load_sync_cache, mark_synced, save_sync_cache
 
 
 def sync(server, library_name, dry_run=False, force_refresh=False, cache_dir=None):
     """Run the full poster sync pipeline.
 
-    Returns a dict with counts: updated, title_updated, no_poster, no_match, already_have.
+    Returns a dict with counts: updated, title_updated, skipped, no_poster, no_match.
     """
     # Build or load catalog
     catalog = build_catalog(force_refresh=force_refresh, cache_dir=cache_dir)
     catalog_slugs = catalog["slugs"]
     print()
+
+    # Load sync cache
+    sync_cache = load_sync_cache(cache_dir)
 
     # Connect to media server
     print(f"Connecting to {server.__class__.__name__} ...")
@@ -32,13 +36,21 @@ def sync(server, library_name, dry_run=False, force_refresh=False, cache_dir=Non
 
     updated = 0
     title_updated = 0
+    skipped = 0
     no_poster = 0
     no_match = 0
+
+    cache_dirty = False
 
     for item in all_items:
         name = item["Name"]
         item_id = item["Id"]
         has_poster = "Primary" in item.get("ImageTags", {})
+
+        # Skip items already fully synced with the current title
+        if has_poster and is_synced(item_id, name, sync_cache):
+            skipped += 1
+            continue
 
         # Match to catalog
         matched_slug, confidence, method = match_to_catalog(name, catalog_slugs)
@@ -49,18 +61,25 @@ def sync(server, library_name, dry_run=False, force_refresh=False, cache_dir=Non
                 no_match += 1
             continue
 
-        # Fetch page (poster + title) — only print header if something to do
+        # Fetch page (poster + title)
         poster_url, page_title = scrape_page(matched_slug)
 
         needs_poster = not has_poster
         needs_title = page_title and page_title != name
 
         if not needs_poster and not needs_title:
+            # Already in sync — update cache so we skip next time
+            if not dry_run:
+                mark_synced(item_id, name, matched_slug, sync_cache)
+                cache_dirty = True
+            skipped += 1
             continue
 
         conf_str = f"{confidence:.0%}" if confidence == 1.0 else f"{confidence:.1%}"
         print(f"[{name}]")
         print(f"  \u2192 Matched: /{matched_slug} ({method}, {conf_str})")
+
+        final_title = page_title if needs_title else name
 
         # Update title if it differs
         if needs_title:
@@ -95,20 +114,29 @@ def sync(server, library_name, dry_run=False, force_refresh=False, cache_dir=Non
                 updated += 1
             else:
                 no_poster += 1
+                continue
+
+        # Mark fully synced
+        if not dry_run:
+            mark_synced(item_id, final_title, matched_slug, sync_cache)
+            cache_dirty = True
+
+    if cache_dirty:
+        save_sync_cache(sync_cache, cache_dir)
 
     results = {
         "updated": updated,
         "title_updated": title_updated,
+        "skipped": skipped,
         "no_poster": no_poster,
         "no_match": no_match,
-        "already_have": already_have,
     }
 
     print(f"\nDone.")
     print(f"  Posters uploaded: {updated}")
     print(f"  Titles updated:   {title_updated}")
+    print(f"  Already synced:   {skipped}")
     print(f"  No poster on page:{no_poster}")
     print(f"  No catalog match: {no_match}")
-    print(f"  Already had art:  {already_have}")
 
     return results
