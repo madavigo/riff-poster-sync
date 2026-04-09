@@ -7,7 +7,7 @@ name = "rifftrax-poster-sync"
 version = "0.1.0"
 description = "Sync poster art from rifftrax.com to Emby, Plex, or Jellyfin"
 readme = "README.md"
-license = "MIT"
+license = {text = "MIT"}
 requires-python = ">=3.9"
 dependencies = [
     "requests>=2.28",
@@ -19,7 +19,6 @@ keywords = ["rifftrax", "emby", "plex", "jellyfin", "poster", "media"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Environment :: Console",
-    "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
     "Topic :: Multimedia :: Video",
 ]
