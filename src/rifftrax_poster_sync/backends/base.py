@@ -22,7 +22,7 @@ class MediaServer(ABC):
         """
 
     @abstractmethod
-    def update_title(self, item_id, title):
+    def update_title(self, item_id, title, user_id=None):
         """Update the display title for an item. Returns True on success."""
 
     @abstractmethod

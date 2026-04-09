@@ -53,11 +53,12 @@ class EmbyServer(MediaServer):
         missing = [i for i in items if "Primary" not in i.get("ImageTags", {})]
         return items, missing
 
-    def update_title(self, item_id, title):
-        url = f"{self.host}/Items/{item_id}?api_key={self.api_key}"
-        # Emby requires sending the full item object back; fetch it first
-        item = self._get(f"/Items/{item_id}")
+    def update_title(self, item_id, title, user_id=None):
+        # Fetch full item via user-scoped endpoint
+        fetch_path = f"/Users/{user_id}/Items/{item_id}" if user_id else f"/Items/{item_id}"
+        item = self._get(fetch_path)
         item["Name"] = title
+        url = f"{self.host}/Items/{item_id}?api_key={self.api_key}"
         data = json.dumps(item).encode("utf-8")
         req = urllib.request.Request(url, data=data, method="POST")
         req.add_header("Content-Type", "application/json")

@@ -67,7 +67,7 @@ def sync(server, library_name, dry_run=False, force_refresh=False, cache_dir=Non
             if dry_run:
                 print(f"  (dry run) Would rename: '{name}' → '{page_title}'")
                 title_updated += 1
-            elif server.update_title(item_id, page_title):
+            elif server.update_title(item_id, page_title, user_id=user_id):
                 print(f"  \u2713 Title: '{name}' → '{page_title}'")
                 title_updated += 1
 
