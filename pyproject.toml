@@ -9,6 +9,9 @@ description = "Sync poster art from rifftrax.com to Emby, Plex, or Jellyfin"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.9"
+dependencies = [
+    "requests>=2.28",
+]
 authors = [
     {name = "madavigo"},
 ]
