@@ -30,6 +30,8 @@ def clean_name(name):
             name = re.sub(r"([a-z])([A-Z])", r"\1 \2", name)
             name = re.sub(r"([A-Za-z])(\d)", r"\1 \2", name)
             name = re.sub(r"(\d)([A-Za-z])", r"\1 \2", name)
+            # Re-join ordinal suffixes split above: "20 th" → "20th"
+            name = re.sub(r"(\d) (st|nd|rd|th)(\b|[^a-z])", r"\1\2\3", name)
         # Single uppercase letters glued to next word: IAmMy → I Am My
         name = re.sub(r"(?<![A-Z])([A-Z])([A-Z][a-z])", r"\1 \2", name)
         # Lowercase prepositions glued from CamelCase: ReturnofSwampThing
