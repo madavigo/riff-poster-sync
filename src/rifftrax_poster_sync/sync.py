@@ -55,6 +55,21 @@ def sync(server, library_name, dry_run=False, force_refresh=False, cache_dir=Non
         # Match to catalog
         matched_slug, confidence, method = match_to_catalog(name, catalog_slugs)
         if not matched_slug:
+            # Fallback: try candidate slugs directly against rifftrax.com
+            # handles titles not yet in the sitemap
+            from .matcher import candidate_slugs as _candidate_slugs
+            from .scraper import _fetch_page
+            for candidate in _candidate_slugs(name):
+                if "/" in candidate:
+                    continue
+                page = _fetch_page(candidate)
+                if page:
+                    matched_slug = candidate
+                    confidence = 1.0
+                    method = "direct-fetch"
+                    break
+
+        if not matched_slug:
             if not has_poster:
                 print(f"[{name}]")
                 print(f'  \u2717 No catalog match (cleaned: "{clean_name(name)}")')
