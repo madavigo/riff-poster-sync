@@ -18,6 +18,7 @@ metadata:
   namespace: media
 spec:
   schedule: "3 3 * * *"
+  suspend: true
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 3
   failedJobsHistoryLimit: 3
