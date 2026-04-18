@@ -43,7 +43,7 @@ spec:
             # HTTP call and JSON parsing with no extra dependencies.
             # Replaced curlimages/curl + grep/cut pipeline (broke on escaped
             # quotes and JSON key ordering).
-            image: python:3.12-slim
+            image: python@sha256:804ddf3251a60bbf9c92e73b7566c40428d54d0e79d3428194edf40da6521286
             command:
             - python3
             - -c

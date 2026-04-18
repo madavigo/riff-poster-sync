@@ -2,11 +2,14 @@
 
 import base64
 import json
+import logging
 import urllib.error
 import urllib.parse
 import urllib.request
 
 from .base import MediaServer
+
+_log = logging.getLogger(__name__)
 
 # Emby accepts the API key as an Authorization header, keeping it out of
 # server-side access logs (which log the full request URL by default).
@@ -28,12 +31,13 @@ def _sniff_mime(data: bytes) -> str:
         return "image/webp"
     if data[:3] == b"GIF":
         return "image/gif"
-    import warnings
-    warnings.warn(
-        f"upload_poster: unrecognised image signature {data[:4]!r}; "
+    # logging.warning fires on every occurrence; warnings.warn deduplicates
+    # by call site so only the first unrecognised image in a batch would
+    # surface — exactly the silent failure mode we're trying to avoid.
+    _log.warning(
+        "upload_poster: unrecognised image signature %r; "
         "defaulting to image/jpeg — Emby may reject the upload",
-        RuntimeWarning,
-        stacklevel=3,
+        data[:4],
     )
     return "image/jpeg"
 
