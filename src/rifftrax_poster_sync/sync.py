@@ -136,6 +136,19 @@ def sync(server, library_name, dry_run=False, force_refresh=False, cache_dir=Non
             mark_synced(item_id, final_title, matched_slug, sync_cache)
             cache_dirty = True
 
+    # Prune cache entries for items that no longer exist in the library.
+    # Without this, a deleted item's entry lingers — if Emby reuses the same
+    # item_id when the video is re-added AND auto-assigns a poster (e.g. from
+    # TMDB) before the next sync run, the stale cache entry would cause the
+    # RiffTrax poster to be silently skipped.
+    seen_ids = {str(item["Id"]) for item in all_items}
+    orphaned = [k for k in list(sync_cache) if k not in seen_ids]
+    if orphaned:
+        for k in orphaned:
+            del sync_cache[k]
+        print(f"  Pruned {len(orphaned)} stale cache entries.")
+        cache_dirty = True
+
     if cache_dirty:
         save_sync_cache(sync_cache, cache_dir)
 
