@@ -94,3 +94,6 @@ The tool handles common filename conventions from RiffTrax downloads:
 ## Safe to re-run
 
 The tool only processes items that don't already have a primary poster image. Re-running it is safe and fast — items that already have art are skipped.
+
+## Outstanding Issues
+1. Some videos for example: (https://www.rifftrax.com/sherlock-holmes-the-pearl-of-death) see the poster art populated with the background art instead of the poster art from the rifftrax site.
