@@ -25,6 +25,8 @@ spec:
   jobTemplate:
     spec:
       backoffLimit: 1
+      activeDeadlineSeconds: 1800    # 30 min; covers a full library scan
+      ttlSecondsAfterFinished: 86400 # clean up finished Job objects after 24h
       template:
         spec:
           restartPolicy: Never
@@ -37,18 +39,34 @@ spec:
               claimName: rifftrax-poster-sync-cache
           initContainers:
           - name: vault-secrets
-            image: curlimages/curl:latest
+            # python:3.12-slim: stdlib urllib.request + json covers the Vault
+            # HTTP call and JSON parsing with no extra dependencies.
+            # Replaced curlimages/curl + grep/cut pipeline (broke on escaped
+            # quotes and JSON key ordering).
+            image: python@sha256:804ddf3251a60bbf9c92e73b7566c40428d54d0e79d3428194edf40da6521286
             command:
-            - sh
+            - python3
             - -c
             - |
-              set -e
-              secrets=$(curl -sf \
-                -H "X-Vault-Token: ${VAULT_TOKEN}" \
-                http://vault.vault.svc.cluster.local:8200/v1/secret/data/resilience-lab/rifftrax-poster-sync)
-              echo "$secrets" | grep -o '"emby_host":"[^"]*"' | cut -d'"' -f4 > /secrets/emby_host
-              echo "$secrets" | grep -o '"emby_api_key":"[^"]*"' | cut -d'"' -f4 > /secrets/emby_api_key
-              echo "$secrets" | grep -o '"library":"[^"]*"' | cut -d'"' -f4 > /secrets/library
+              import json, urllib.request, os, stat
+              req = urllib.request.Request(
+                "http://vault.vault.svc.cluster.local:8200/v1/secret/data/resilience-lab/rifftrax-poster-sync",
+                headers={"X-Vault-Token": os.environ["VAULT_TOKEN"]},
+              )
+              with urllib.request.urlopen(req) as r:
+                d = json.load(r)["data"]["data"]
+              # os.open with O_CREAT + explicit mode 0o600 so files are
+              # created owner-read-only before any data is written.
+              # Bare open() leaves the file world-readable until chown/chmod.
+              _secrets = {
+                "/secrets/emby_host":    d["emby_host"],
+                "/secrets/emby_api_key": d["emby_api_key"],
+                "/secrets/library":      d.get("library", "RiffTrax"),
+              }
+              for path, val in _secrets.items():
+                fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+                with os.fdopen(fd, "w") as f:
+                  f.write(val)
             env:
             - name: VAULT_TOKEN
               valueFrom:
@@ -58,9 +76,13 @@ spec:
             volumeMounts:
             - name: secrets
               mountPath: /secrets
+            securityContext:
+              allowPrivilegeEscalation: false
+              capabilities:
+                drop: ["ALL"]
           containers:
           - name: sync
-            image: ghcr.io/madavigo/riff-poster-sync:latest
+            image: ghcr.io/madavigo/riff-poster-sync:0.2.0
             command:
             - sh
             - -c
@@ -82,3 +104,7 @@ spec:
               limits:
                 memory: 256Mi
                 cpu: 250m
+            securityContext:
+              allowPrivilegeEscalation: false
+              capabilities:
+                drop: ["ALL"]

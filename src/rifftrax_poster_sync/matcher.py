@@ -4,7 +4,7 @@ import difflib
 import html
 import re
 
-FUZZY_THRESHOLD = 0.70
+FUZZY_THRESHOLD = 0.80
 
 # Only strip quality suffixes preceded by underscore to avoid stripping real
 # title words like "Spy High" or "Split Second"
@@ -195,7 +195,9 @@ def match_to_catalog(name, catalog_slugs):
             best_score = score
             best_slug = cat_slug
 
-    if best_score >= FUZZY_THRESHOLD:
+    # Require at least 2 words before accepting a fuzzy match — single-word
+    # titles have too little entropy to match reliably at any threshold.
+    if best_score >= FUZZY_THRESHOLD and len(cleaned_words.split()) >= 2:
         return best_slug, best_score, "fuzzy"
 
     return None, 0.0, None

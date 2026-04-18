@@ -2,10 +2,44 @@
 
 import base64
 import json
+import logging
 import urllib.error
+import urllib.parse
 import urllib.request
 
 from .base import MediaServer
+
+_log = logging.getLogger(__name__)
+
+# Emby accepts the API key as an Authorization header, keeping it out of
+# server-side access logs (which log the full request URL by default).
+_AUTH_HEADER = "Authorization"
+
+
+def _sniff_mime(data: bytes) -> str:
+    """Return the MIME type for image bytes by inspecting magic bytes.
+
+    Falls back to image/jpeg (Emby's most-tolerated format) when the
+    signature is unrecognised. Logs a warning so silent failures surface
+    in CronJob logs.
+    """
+    if data[:4] == b"\x89PNG":
+        return "image/png"
+    if data[:2] == b"\xff\xd8":
+        return "image/jpeg"
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "image/webp"
+    if data[:3] == b"GIF":
+        return "image/gif"
+    # logging.warning fires on every occurrence; warnings.warn deduplicates
+    # by call site so only the first unrecognised image in a batch would
+    # surface — exactly the silent failure mode we're trying to avoid.
+    _log.warning(
+        "upload_poster: unrecognised image signature %r; "
+        "defaulting to image/jpeg — Emby may reject the upload",
+        data[:4],
+    )
+    return "image/jpeg"
 
 
 class EmbyServer(MediaServer):
@@ -13,12 +47,18 @@ class EmbyServer(MediaServer):
         self.host = host.rstrip("/")
         self.api_key = api_key
 
+    def _auth_value(self):
+        return f"MediaBrowser Token={self.api_key}"
+
     def _get(self, path, params=None):
-        url = f"{self.host}{path}?api_key={self.api_key}"
+        url = f"{self.host}{path}"
         if params:
-            for k, v in params.items():
-                url += f"&{k}={urllib.request.quote(str(v))}"
+            # urllib.parse.urlencode handles the full encoding contract
+            # (spaces, special chars, None values).  urllib.request.quote
+            # does not exist and would AttributeError at runtime.
+            url = f"{url}?{urllib.parse.urlencode(params)}"
         req = urllib.request.Request(url)
+        req.add_header(_AUTH_HEADER, self._auth_value())
         with urllib.request.urlopen(req) as resp:
             return json.loads(resp.read())
 
@@ -54,13 +94,13 @@ class EmbyServer(MediaServer):
         return items, missing
 
     def update_title(self, item_id, title, user_id=None):
-        # Fetch full item via user-scoped endpoint
         fetch_path = f"/Users/{user_id}/Items/{item_id}" if user_id else f"/Items/{item_id}"
         item = self._get(fetch_path)
         item["Name"] = title
-        url = f"{self.host}/Items/{item_id}?api_key={self.api_key}"
+        url = f"{self.host}/Items/{item_id}"
         data = json.dumps(item).encode("utf-8")
         req = urllib.request.Request(url, data=data, method="POST")
+        req.add_header(_AUTH_HEADER, self._auth_value())
         req.add_header("Content-Type", "application/json")
         try:
             with urllib.request.urlopen(req) as resp:
@@ -70,10 +110,12 @@ class EmbyServer(MediaServer):
             return False
 
     def upload_poster(self, item_id, image_bytes):
-        url = f"{self.host}/Items/{item_id}/Images/Primary?api_key={self.api_key}"
+        url = f"{self.host}/Items/{item_id}/Images/Primary"
         encoded = base64.b64encode(image_bytes)
+        mime = _sniff_mime(image_bytes)
         req = urllib.request.Request(url, data=encoded, method="POST")
-        req.add_header("Content-Type", "image/jpeg")
+        req.add_header(_AUTH_HEADER, self._auth_value())
+        req.add_header("Content-Type", mime)
         try:
             with urllib.request.urlopen(req) as resp:
                 return resp.status in (200, 204)
