@@ -7,18 +7,28 @@ import urllib.request
 
 from .base import MediaServer
 
+# Emby accepts the API key as an Authorization header, keeping it out of
+# server-side access logs (which log the full request URL by default).
+_AUTH_HEADER = "Authorization"
+
 
 class EmbyServer(MediaServer):
     def __init__(self, host, api_key):
         self.host = host.rstrip("/")
         self.api_key = api_key
 
+    def _auth_value(self):
+        return f"MediaBrowser Token={self.api_key}"
+
     def _get(self, path, params=None):
-        url = f"{self.host}{path}?api_key={self.api_key}"
+        url = f"{self.host}{path}"
         if params:
-            for k, v in params.items():
-                url += f"&{k}={urllib.request.quote(str(v))}"
+            query = "&".join(
+                f"{k}={urllib.request.quote(str(v))}" for k, v in params.items()
+            )
+            url = f"{url}?{query}"
         req = urllib.request.Request(url)
+        req.add_header(_AUTH_HEADER, self._auth_value())
         with urllib.request.urlopen(req) as resp:
             return json.loads(resp.read())
 
@@ -58,9 +68,10 @@ class EmbyServer(MediaServer):
         fetch_path = f"/Users/{user_id}/Items/{item_id}" if user_id else f"/Items/{item_id}"
         item = self._get(fetch_path)
         item["Name"] = title
-        url = f"{self.host}/Items/{item_id}?api_key={self.api_key}"
+        url = f"{self.host}/Items/{item_id}"
         data = json.dumps(item).encode("utf-8")
         req = urllib.request.Request(url, data=data, method="POST")
+        req.add_header(_AUTH_HEADER, self._auth_value())
         req.add_header("Content-Type", "application/json")
         try:
             with urllib.request.urlopen(req) as resp:
@@ -70,10 +81,14 @@ class EmbyServer(MediaServer):
             return False
 
     def upload_poster(self, item_id, image_bytes):
-        url = f"{self.host}/Items/{item_id}/Images/Primary?api_key={self.api_key}"
+        url = f"{self.host}/Items/{item_id}/Images/Primary"
         encoded = base64.b64encode(image_bytes)
+        # Sniff magic bytes rather than trusting the URL extension — a CDN
+        # can serve JPEG under a .png path and vice versa.
+        mime = "image/png" if image_bytes[:4] == b"\x89PNG" else "image/jpeg"
         req = urllib.request.Request(url, data=encoded, method="POST")
-        req.add_header("Content-Type", "image/jpeg")
+        req.add_header(_AUTH_HEADER, self._auth_value())
+        req.add_header("Content-Type", mime)
         try:
             with urllib.request.urlopen(req) as resp:
                 return resp.status in (200, 204)
