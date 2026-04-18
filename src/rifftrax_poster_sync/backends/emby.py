@@ -90,6 +90,12 @@ class EmbyServer(MediaServer):
             },
         )
         items = data.get("Items", [])
+        total = data.get("TotalRecordCount")
+        if total is not None and len(items) < total:
+            raise RuntimeError(
+                f"Emby returned only {len(items)} of {total} items — "
+                "aborting to avoid incorrect cache pruning."
+            )
         missing = [i for i in items if "Primary" not in i.get("ImageTags", {})]
         return items, missing
 
