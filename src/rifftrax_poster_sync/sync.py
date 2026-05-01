@@ -56,11 +56,13 @@ def sync(server, library_name, dry_run=False, force_refresh=False, cache_dir=Non
             skipped += 1
             continue
 
-        # Match to catalog
-        matched_slug, confidence, method = match_to_catalog(name, catalog_slugs)
+        # Match to catalog — exact and substring only first
+        matched_slug, confidence, method = match_to_catalog(name, catalog_slugs, fuzzy=False)
+
+        # Before fuzzy matching, try candidate slugs directly on rifftrax.com.
+        # This catches items not yet in the sitemap (e.g. content uploaded outside
+        # the normal workflow) before a fuzzy catalog match can grab the wrong title.
         if not matched_slug:
-            # Fallback: try candidate slugs directly against rifftrax.com
-            # handles titles not yet in the sitemap
             from .matcher import candidate_slugs as _candidate_slugs
             from .scraper import _fetch_page
             for candidate in _candidate_slugs(name):
@@ -72,6 +74,10 @@ def sync(server, library_name, dry_run=False, force_refresh=False, cache_dir=Non
                     confidence = 1.0
                     method = "direct-fetch"
                     break
+
+        # Last resort: fuzzy catalog match
+        if not matched_slug:
+            matched_slug, confidence, method = match_to_catalog(name, catalog_slugs, fuzzy=True)
 
         if not matched_slug:
             if not has_poster:

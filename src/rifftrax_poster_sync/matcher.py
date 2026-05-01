@@ -161,10 +161,11 @@ def candidate_slugs(name):
     return slugs
 
 
-def match_to_catalog(name, catalog_slugs):
+def match_to_catalog(name, catalog_slugs, fuzzy=True):
     """Match an item name to a catalog slug.
 
     Returns (matched_slug, confidence, method) or (None, 0, None).
+    When fuzzy=False, only exact and substring matches are attempted.
     """
     candidates = candidate_slugs(name)
 
@@ -181,7 +182,10 @@ def match_to_catalog(name, catalog_slugs):
             if slug in cat_slug or cat_slug.startswith(slug + "-"):
                 return cat_slug, 0.9, "substring"
 
-    # 3. Fuzzy match
+    if not fuzzy:
+        return None, 0.0, None
+
+    # 3. Fuzzy match (last resort — only after direct-fetch has been tried)
     cleaned = clean_name(name)
     base = _base_slug(cleaned)
     cleaned_words = _slug_to_words(base)
