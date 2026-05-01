@@ -79,14 +79,15 @@ class EmbyServer(MediaServer):
                 return user["Id"]
         return users[0]["Id"]
 
-    def get_items_missing_posters(self, user_id, library_id):
+    def get_items(self, user_id, library_id):
+        """Return all items from the library with image tag info."""
         data = self._get(
             f"/Users/{user_id}/Items",
             {
                 "ParentId": library_id,
                 "Recursive": "true",
                 "IncludeItemTypes": "Movie",
-                "Fields": "Name,ImageTags",
+                "Fields": "Name,ImageTags,BackdropImageTags",
             },
         )
         items = data.get("Items", [])
@@ -96,6 +97,11 @@ class EmbyServer(MediaServer):
                 f"Emby returned only {len(items)} of {total} items — "
                 "aborting to avoid incorrect cache pruning."
             )
+        return items
+
+    def get_items_missing_posters(self, user_id, library_id):
+        """Return (all_items, missing_items) where missing lacks a Primary image."""
+        items = self.get_items(user_id, library_id)
         missing = [i for i in items if "Primary" not in i.get("ImageTags", {})]
         return items, missing
 
@@ -115,8 +121,9 @@ class EmbyServer(MediaServer):
             print(f"  Title update failed: HTTP {e.code} {e.reason}")
             return False
 
-    def upload_poster(self, item_id, image_bytes):
-        url = f"{self.host}/Items/{item_id}/Images/Primary"
+    def _upload_image(self, item_id, image_type, image_bytes):
+        """Upload an image of the given Emby image type (Primary, Backdrop, etc.)."""
+        url = f"{self.host}/Items/{item_id}/Images/{image_type}"
         encoded = base64.b64encode(image_bytes)
         mime = _sniff_mime(image_bytes)
         req = urllib.request.Request(url, data=encoded, method="POST")
@@ -126,5 +133,23 @@ class EmbyServer(MediaServer):
             with urllib.request.urlopen(req) as resp:
                 return resp.status in (200, 204)
         except urllib.error.HTTPError as e:
-            print(f"  Upload failed: HTTP {e.code} {e.reason}")
+            print(f"  Upload ({image_type}) failed: HTTP {e.code} {e.reason}")
+            return False
+
+    def upload_poster(self, item_id, image_bytes):
+        return self._upload_image(item_id, "Primary", image_bytes)
+
+    def upload_backdrop(self, item_id, image_bytes):
+        return self._upload_image(item_id, "Backdrop", image_bytes)
+
+    def delete_image(self, item_id, image_type):
+        """Delete an image of the given type from an item."""
+        url = f"{self.host}/Items/{item_id}/Images/{image_type}"
+        req = urllib.request.Request(url, method="DELETE")
+        req.add_header(_AUTH_HEADER, self._auth_value())
+        try:
+            with urllib.request.urlopen(req) as resp:
+                return resp.status in (200, 204)
+        except urllib.error.HTTPError as e:
+            print(f"  Delete ({image_type}) failed: HTTP {e.code} {e.reason}")
             return False

@@ -2,14 +2,15 @@
 
 from .catalog import build_catalog
 from .matcher import clean_name, match_to_catalog
-from .scraper import download_poster, scrape_page
+from .scraper import download_image, scrape_page
 from .sync_cache import is_synced, load_sync_cache, mark_synced, save_sync_cache
 
 
 def sync(server, library_name, dry_run=False, force_refresh=False, cache_dir=None):
     """Run the full poster sync pipeline.
 
-    Returns a dict with counts: updated, title_updated, skipped, no_poster, no_match.
+    Returns a dict with counts: updated, backdrop_updated, title_updated, skipped,
+    no_poster, no_match.
     """
     # Build or load catalog
     catalog = build_catalog(force_refresh=force_refresh, cache_dir=cache_dir)
@@ -27,7 +28,8 @@ def sync(server, library_name, dry_run=False, force_refresh=False, cache_dir=Non
     user_id = server.get_user_id()
     print(f"Using user id={user_id}\n")
 
-    all_items, missing = server.get_items_missing_posters(user_id, library_id)
+    all_items = server.get_items(user_id, library_id)
+    missing = [i for i in all_items if "Primary" not in i.get("ImageTags", {})]
     already_have = len(all_items) - len(missing)
 
     print(f"Total items: {len(all_items)}")
@@ -35,6 +37,7 @@ def sync(server, library_name, dry_run=False, force_refresh=False, cache_dir=Non
     print(f"  Missing poster:      {len(missing)}\n")
 
     updated = 0
+    backdrop_updated = 0
     title_updated = 0
     skipped = 0
     no_poster = 0
@@ -46,9 +49,10 @@ def sync(server, library_name, dry_run=False, force_refresh=False, cache_dir=Non
         name = item["Name"]
         item_id = item["Id"]
         has_poster = "Primary" in item.get("ImageTags", {})
+        has_backdrop = bool(item.get("BackdropImageTags", []))
 
-        # Skip items already fully synced with the current title
-        if has_poster and is_synced(item_id, name, sync_cache):
+        # Skip items already fully synced (poster + backdrop + title)
+        if has_poster and has_backdrop and is_synced(item_id, name, sync_cache):
             skipped += 1
             continue
 
@@ -72,27 +76,28 @@ def sync(server, library_name, dry_run=False, force_refresh=False, cache_dir=Non
         if not matched_slug:
             if not has_poster:
                 print(f"[{name}]")
-                print(f'  \u2717 No catalog match (cleaned: "{clean_name(name)}")')
+                print(f'  ✗ No catalog match (cleaned: "{clean_name(name)}")')
                 no_match += 1
             continue
 
-        # Fetch page (poster + title)
-        poster_url, page_title = scrape_page(matched_slug)
+        # Fetch page (poster + background + title)
+        poster_url, background_url, page_title = scrape_page(matched_slug)
 
         needs_poster = not has_poster
+        needs_backdrop = not has_backdrop and background_url is not None
         needs_title = page_title and page_title != name
 
-        if not needs_poster and not needs_title:
+        if not needs_poster and not needs_backdrop and not needs_title:
             # Already in sync — update cache so we skip next time
             if not dry_run:
-                mark_synced(item_id, name, matched_slug, sync_cache)
+                mark_synced(item_id, name, matched_slug, sync_cache, backdrop_synced=True)
                 cache_dirty = True
             skipped += 1
             continue
 
         conf_str = f"{confidence:.0%}" if confidence == 1.0 else f"{confidence:.1%}"
         print(f"[{name}]")
-        print(f"  \u2192 Matched: /{matched_slug} ({method}, {conf_str})")
+        print(f"  → Matched: /{matched_slug} ({method}, {conf_str})")
 
         final_title = page_title if needs_title else name
 
@@ -102,38 +107,55 @@ def sync(server, library_name, dry_run=False, force_refresh=False, cache_dir=Non
                 print(f"  (dry run) Would rename: '{name}' → '{page_title}'")
                 title_updated += 1
             elif server.update_title(item_id, page_title, user_id=user_id):
-                print(f"  \u2713 Title: '{name}' → '{page_title}'")
+                print(f"  ✓ Title: '{name}' → '{page_title}'")
                 title_updated += 1
 
         # Upload poster if missing
         if needs_poster:
             if not poster_url:
-                print("  \u2717 No poster image on page")
+                print("  ✗ No poster image on page")
                 no_poster += 1
                 continue
 
-            image_bytes = download_poster(poster_url)
+            image_bytes = download_image(poster_url)
             if not image_bytes:
                 no_poster += 1
                 continue
 
-            print(f"  \u2713 Poster: {poster_url}")
+            print(f"  ✓ Poster: {poster_url}")
 
             if dry_run:
-                print(f"  (dry run) Would upload {len(image_bytes)} bytes")
+                print(f"  (dry run) Would upload poster {len(image_bytes)} bytes")
                 updated += 1
-                continue
-
-            if server.upload_poster(item_id, image_bytes):
-                print("  \u2713 Uploaded")
+            elif server.upload_poster(item_id, image_bytes):
+                print("  ✓ Poster uploaded")
                 updated += 1
             else:
                 no_poster += 1
                 continue
 
+        # Upload backdrop if missing
+        backdrop_ok = has_backdrop  # already had one
+        if needs_backdrop:
+            image_bytes = download_image(background_url)
+            if image_bytes:
+                print(f"  ✓ Backdrop: {background_url}")
+                if dry_run:
+                    print(f"  (dry run) Would upload backdrop {len(image_bytes)} bytes")
+                    backdrop_updated += 1
+                    backdrop_ok = True
+                elif server.upload_backdrop(item_id, image_bytes):
+                    print("  ✓ Backdrop uploaded")
+                    backdrop_updated += 1
+                    backdrop_ok = True
+                else:
+                    print("  ✗ Backdrop upload failed")
+            else:
+                print("  ✗ Could not download backdrop image")
+
         # Mark fully synced
         if not dry_run:
-            mark_synced(item_id, final_title, matched_slug, sync_cache)
+            mark_synced(item_id, final_title, matched_slug, sync_cache, backdrop_synced=backdrop_ok)
             cache_dirty = True
 
     # Prune cache entries for items that no longer exist in the library.
@@ -157,6 +179,7 @@ def sync(server, library_name, dry_run=False, force_refresh=False, cache_dir=Non
 
     results = {
         "updated": updated,
+        "backdrop_updated": backdrop_updated,
         "title_updated": title_updated,
         "skipped": skipped,
         "no_poster": no_poster,
@@ -164,10 +187,11 @@ def sync(server, library_name, dry_run=False, force_refresh=False, cache_dir=Non
     }
 
     print(f"\nDone.")
-    print(f"  Posters uploaded: {updated}")
-    print(f"  Titles updated:   {title_updated}")
-    print(f"  Already synced:   {skipped}")
-    print(f"  No poster on page:{no_poster}")
-    print(f"  No catalog match: {no_match}")
+    print(f"  Posters uploaded:   {updated}")
+    print(f"  Backdrops uploaded: {backdrop_updated}")
+    print(f"  Titles updated:     {title_updated}")
+    print(f"  Already synced:     {skipped}")
+    print(f"  No poster on page:  {no_poster}")
+    print(f"  No catalog match:   {no_match}")
 
     return results

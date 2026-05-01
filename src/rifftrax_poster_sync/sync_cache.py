@@ -1,4 +1,4 @@
-"""Cache for tracking which items have been fully synced (poster + title)."""
+"""Cache for tracking which items have been fully synced (poster + backdrop + title)."""
 
 import json
 import pathlib
@@ -28,18 +28,20 @@ def save_sync_cache(cache, cache_dir=None):
 
 
 def is_synced(item_id, current_name, cache):
-    """Return True if this item is already synced and the title hasn't changed."""
+    """Return True if this item is fully synced: title matches and backdrop has been set."""
     entry = cache.get(str(item_id))
     if not entry:
         return False
-    # If Emby name matches what we last set, we're done
-    return entry.get("synced_title") == current_name
+    if entry.get("synced_title") != current_name:
+        return False
+    return bool(entry.get("backdrop_synced"))
 
 
-def mark_synced(item_id, synced_title, slug, cache):
+def mark_synced(item_id, synced_title, slug, cache, backdrop_synced=False):
     """Record that an item has been fully synced."""
     cache[str(item_id)] = {
         "synced_title": synced_title,
         "slug": slug,
         "synced_at": time.time(),
+        "backdrop_synced": backdrop_synced,
     }

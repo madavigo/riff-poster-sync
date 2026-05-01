@@ -1,10 +1,12 @@
 """Poster image scraping from rifftrax.com pages."""
 
+import json
 import re
 import urllib.error
 import urllib.request
 
 RIFFTRAX_BASE = "https://www.rifftrax.com"
+_PRODUCT_API = f"{RIFFTRAX_BASE}/api/dante/product_display"
 
 _GENERIC_IMAGE_FRAGMENTS = [
     "Logo-optimized", "FooterCouch", "RiffPlanet-social",
@@ -39,18 +41,55 @@ def _fetch_page(slug):
         return None
 
 
-def scrape_page(slug):
-    """Fetch a rifftrax.com product page and return (poster_url, title).
+def _extract_nid(page_html):
+    """Extract the Drupal node ID from the page HTML shortlink."""
+    m = re.search(r'<link rel="shortlink" href="[^"]+/node/(\d+)"', page_html)
+    return m.group(1) if m else None
 
-    Either value may be None if not found.
+
+def _call_product_api(nid):
+    """Fetch product data from the rifftrax.com product display API. Returns dict or None."""
+    url = f"{_PRODUCT_API}/{nid}"
+    try:
+        req = urllib.request.Request(
+            url, headers={"User-Agent": "Mozilla/5.0", "Accept": "application/json"}
+        )
+        with urllib.request.urlopen(req) as resp:
+            data = json.loads(resp.read())
+            return data if isinstance(data, dict) else None
+    except Exception:
+        return None
+
+
+def scrape_page(slug):
+    """Fetch a rifftrax.com product page and return (poster_url, background_url, title).
+
+    Any value may be None if not found. Uses the product display API when available,
+    falling back to HTML scraping.
     """
     page_html = _fetch_page(slug)
     if not page_html:
-        return None, None
+        return None, None, None
 
+    nid = _extract_nid(page_html)
+    if nid:
+        data = _call_product_api(nid)
+        if data:
+            poster_url = (
+                (data.get("poster_full") or {}).get("uri")
+                or (data.get("poster") or {}).get("uri")
+            )
+            background_url = (data.get("preview_image") or {}).get("uri")
+            import html as _html
+            title = data.get("title")
+            if title:
+                title = _html.unescape(title.strip()) or None
+            return poster_url, background_url, title
+
+    # Fallback: extract from HTML (for pages without the postercard component)
     poster_url = _extract_poster(page_html)
     title = _extract_title(page_html)
-    return poster_url, title
+    return poster_url, None, title
 
 
 def _extract_poster(page_html):
@@ -127,15 +166,20 @@ def scrape_poster_url(slug):
         DeprecationWarning,
         stacklevel=2,
     )
-    poster_url, _ = scrape_page(slug)
+    poster_url, _, _ = scrape_page(slug)
     return poster_url
+
+
+def download_image(url):
+    """Download an image and return the bytes, or None on failure."""
+    try:
+        with urllib.request.urlopen(url) as resp:
+            return resp.read()
+    except Exception as e:
+        print(f"  Warning: Could not download {url}: {e}")
+        return None
 
 
 def download_poster(poster_url):
     """Download a poster image and return the bytes, or None on failure."""
-    try:
-        with urllib.request.urlopen(poster_url) as resp:
-            return resp.read()
-    except Exception as e:
-        print(f"  Warning: Could not download {poster_url}: {e}")
-        return None
+    return download_image(poster_url)
